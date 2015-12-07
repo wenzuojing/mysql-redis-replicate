@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8"/>
+    <title>>mysql redis replicate web console</title>
+    <link href="css/bootstrap.css" rel="stylesheet">
+
+    <style>
+        body {
+            padding: 20px;
+        }
+
+    </style>
+
+    <script src="http://code.jquery.com/jquery-1.10.1.min.js"></script>
+</head>
+
+<body>
+<button id="add-destination" type="button">Add</button>
+<table class="table table-bordered table-hover">
+
+    <thead>
+    <tr>
+        <th>Destination</th>
+        <th>MySQL Status</th>
+        <th>Sync Status</th>
+        <th>Run On</th>
+        <th>Run Fail</th>
+        <th>Insert Count</th>
+        <th>Update Count</th>
+        <th>Delete Count</th>
+        <th>Handle Speed</th>
+        <th></th>
+    </tr>
+
+    </thead>
+
+    <tbody id="all-destinations">
+
+
+    </tbody>
+</table>
+
+<div>
+    注意:配置修改后需要重新加载才生效( STOP -> START)
+
+</div>
+<script type="text/javascript">
+
+    var tpl = '<tr>' +
+            '<td>#destination</td>' +
+            '<td>#mysqlStatus</td>' +
+            '<td>#syncStatus</td>' +
+            '<td>#runOn</td>' +
+            '<td>#runFail</td>' +
+            '<td>#insertCount</td>' +
+            '<td>#updateCount</td>' +
+            '<td>#deleteCount</td>' +
+            '<td>#handleSpeed</td>' +
+            '<td> <button type="button" onclick="edit(\'#destination\')">EDIT</button> <button type="button" onclick="opt(this , \'#destination\')" >DELETE</button> <button type="button" onclick="opt(this , \'#destination\')" >#status</button> </td>' +
+            '</tr>'
+
+
+    function opt(e, destination) {
+        var opt = $(e).text();
+
+        if ("START" == opt) {
+
+            $.post("alive/server/ids", {}, function (data) {
+
+                if (data.length == 0) {
+                    alert("Not available server")
+                } else {
+                    var id = prompt("Run on which server ? You can input one of serverId(" + data + ").")
+                    if (data.indexOf(id) != -1) {
+
+                        $.get("destination/opt?opt=" + opt + "&destination=" + destination + "&runOn=" + id, function (data) {
+                            alert(data)
+                            if ("ok" == data) {
+                                document.location.reload()
+                            }
+                        }, "text")
+
+                    } else {
+                        alert("Illegal input.")
+                    }
+                }
+
+            }, "json")
+
+        } else {
+            if (!confirm("SURE " + opt)) return
+
+            $.get("destination/opt?opt=" + opt + "&destination=" + destination, function (data) {
+                alert(data)
+                if ("ok" == data) {
+                    document.location.reload()
+                }
+            }, "text")
+        }
+
+    }
+
+    function edit(destination) {
+        document.location.href = "destination.html?destination=" + destination
+    }
+
+    function deleteFn(e, destination) {
+
+        if (!confirm("Sure delete")) return
+
+        $.get("destination/delete?destination=" + destination, function (data) {
+            if ("ok" == data) {
+                $(e).parent().parent().remove()
+            } else {
+                alert(data)
+            }
+        }, "text")
+    }
+
+    $.get("destination/all", function (data) {
+        console.log(data)
+        $(data).each(function () {
+            var status = this.stopped ? "START" : "STOP";
+            var html = tpl.replace(/#destination/g, this.destination).
+            replace("#mysqlStatus", this.mysqlStatus).
+            replace("#syncStatus", this.syncStatus).
+            replace("#runOn", !this.runOn ? "N/A" : this.runOn).
+            replace("#runFail", this.runFail).
+            replace("#insertCount", this.insertCount).
+            replace("#updateCount", this.updateCount).
+            replace("#deleteCount", this.deleteCount).
+            replace("#handleSpeed", this.handleSpeed).
+            replace("#status", status)
+            $("#all-destinations").append($(html))
+        })
+
+    }, "json")
+
+    $("#add-destination").click(function () {
+        document.location.href = "destination.html"
+    })
+
+</script>
+
+</body>
+
+</html>
