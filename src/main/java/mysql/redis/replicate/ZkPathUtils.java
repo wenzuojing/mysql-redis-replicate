@@ -16,7 +16,7 @@ public class ZkPathUtils {
             zkClient.createPersistent(getDestinationConfigPath(), true);
         }
 
-        if (zkClient.exists(getIdsPath())) {
+        if (!zkClient.exists(getIdsPath())) {
             zkClient.createPersistent(getIdsPath(), true);
         }
 

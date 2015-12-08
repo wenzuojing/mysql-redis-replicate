@@ -39,7 +39,7 @@ public class RedisUtils {
 
 
     public static ShardedJedis createSharedJedis(String redisInfos, String redisPassword) {
-        String[] redisAddressInfos = redisInfos.split("\",| |(\\r)?\\n\"");
+        String[] redisAddressInfos = redisInfos.split(",| |(\\r)?\\n");
         List<JedisShardInfo> jdsInfoList = new ArrayList<JedisShardInfo>(redisAddressInfos.length);
         for (String address : redisAddressInfos) {
             String[] hostAndPort = address.trim().split(":");
@@ -64,6 +64,36 @@ public class RedisUtils {
             pipelined.hset(key, column, data.get(column));
         }
         pipelined.sync();
+    }
+
+
+    public static void returnResource( JedisPool jedisPool ,  Jedis jedis, boolean broken) {
+        if (jedis != null) {
+            if (broken) {
+                jedisPool.returnBrokenResource(jedis);
+            } else {
+                jedisPool.returnResource(jedis);
+            }
+        }
+    }
+
+    public static void returnResource(ShardedJedisPool shardedJedisPool ,ShardedJedis shardedJedis, boolean broken) {
+        if (shardedJedis != null) {
+            if (broken) {
+                shardedJedisPool.returnBrokenResource(shardedJedis);
+            } else {
+                shardedJedisPool.returnResource(shardedJedis);
+            }
+        }
+    }
+
+    public static void main(String[] args) {
+
+
+        ShardedJedis sharedJedis = createSharedJedis("172.16.1.152,172.16.1.153", null);
+
+        String s = sharedJedis.getShard("user_8716184").get("user_8716184");
+        System.out.println(s);
     }
 
 

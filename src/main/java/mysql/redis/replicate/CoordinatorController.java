@@ -181,7 +181,7 @@ public class CoordinatorController implements ZookeeperLeaderElector.LeaderListe
         return ZookeeperUtils.readData(ZkPathUtils.getIdsPath(id), ServerInfo.class);
     }
 
-    private static class ServerInfo {
+    public static class ServerInfo {
 
         String id;
         String host;

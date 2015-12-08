@@ -21,6 +21,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 public class ControllerService {
 
@@ -33,8 +35,11 @@ public class ControllerService {
 
     private CanalServerWithEmbedded server;
 
+    private ScheduledExecutorService scheduledExecutorService ;
+
     public ControllerService(Conf conf) throws IOException {
         this.conf = conf;
+        this.scheduledExecutorService = Executors.newScheduledThreadPool(Runtime.getRuntime().availableProcessors());
     }
 
     public void setDestinationConfigManager(DestinationConfigManager destinationConfigManager) {
@@ -74,7 +79,7 @@ public class ControllerService {
             task.safeStop();
         }
         server.start(destination);
-        MessagePuller puller = new MessagePuller(conf.getCanalBatchSize(), destination, server, new RedisSink(destinationConfig));
+        MessagePuller puller = new MessagePuller(conf.getCanalBatchSize(), destination, server, new RedisSink(destinationConfig , conf.getJedisPoolConfig() ) , scheduledExecutorService );
         puller.start();
         runningTasks.put(destination, puller);
         logger.info("## Started destination task:" + destinationConfig.getDestination());
@@ -86,6 +91,7 @@ public class ControllerService {
             stopTask(dest);
         }
         server.stop();
+        scheduledExecutorService.shutdownNow();
     }
 
 

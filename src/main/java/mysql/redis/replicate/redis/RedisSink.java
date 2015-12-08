@@ -8,9 +8,12 @@ import mysql.redis.replicate.canal.AbstractSink;
 import mysql.redis.replicate.config.DestinationConfig;
 import mysql.redis.replicate.groovy.IRow2map;
 import mysql.redis.replicate.groovy.Row2mapManager;
+import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
 import org.slf4j.Logger;
 import redis.clients.jedis.ShardedJedis;
 import redis.clients.jedis.ShardedJedisPipeline;
+import redis.clients.jedis.ShardedJedisPool;
+import redis.clients.jedis.exceptions.JedisException;
 
 import java.util.List;
 import java.util.Map;
@@ -24,10 +27,12 @@ public class RedisSink extends AbstractSink {
 
     private final Row2mapManager row2mapManager;
 
+    private final GenericObjectPoolConfig redisConfig ;
 
-    public RedisSink(DestinationConfig destinationConfig) {
+    public RedisSink(DestinationConfig destinationConfig , GenericObjectPoolConfig redisConfig ) {
         super(destinationConfig);
         this.row2mapManager = new Row2mapManager(destinationConfig);
+        this.redisConfig = redisConfig ;
     }
 
     @Override
@@ -38,13 +43,12 @@ public class RedisSink extends AbstractSink {
     @Override
     protected AbstractSink.SinkWorker createSinkWorker(DestinationConfig.TableConfig tableConfig) {
         return new AbstractSink.SinkWorker(tableConfig) {
-            private final ShardedJedis shardedJedis = RedisUtils.createSharedJedis(tableConfig.getRedisInfos(), tableConfig.getRedisPassword());
+            private final ShardedJedisPool shardedJedisPool = RedisUtils.createSharedJedisPool( redisConfig , tableConfig.getRedisInfos(), tableConfig.getRedisPassword());
 
 
             @Override
             protected void handleInsert(List<CanalEntry.RowData> rowDatasList) {
 
-                ShardedJedisPipeline pipelined = shardedJedis.pipelined();
                 for (CanalEntry.RowData rowData : rowDatasList) {
                     List<CanalEntry.Column> afterColumnsList = rowData.getAfterColumnsList();
 
@@ -69,17 +73,29 @@ public class RedisSink extends AbstractSink {
                         return;
                     }
                     String key = String.format("%s_%s", tableConfig.getPureTable(), id.toString());
-                    pipelined.set(key, JsonUtils.marshalToString(map));
+                    ShardedJedis shardedJedis = shardedJedisPool.getResource();
+                    boolean broken = false;
+                    try {
+                        shardedJedis.getShard(key).set(key , JsonUtils.marshalToString(map) ) ;
+                    } catch (JedisException e) {
+                        broken = true;
+                        throw  e ;
+                    } catch (Exception e) {
+                        throw  e ;
+                    } finally {
+                        RedisUtils.returnResource(shardedJedisPool , shardedJedis, broken);
+                    }
+
                 }
 
-                pipelined.sync();
 
             }
+
+
 
             @Override
             protected void handleUpdate(List<CanalEntry.RowData> rowDatasList) {
 
-                ShardedJedisPipeline pipelined = shardedJedis.pipelined();
                 for (CanalEntry.RowData rowData : rowDatasList) {
 
                     List<CanalEntry.Column> afterColumnsList = rowData.getAfterColumnsList();
@@ -110,17 +126,27 @@ public class RedisSink extends AbstractSink {
                             return;
                         }
                         String key = String.format("%s_%s", tableConfig.getPureTable(), id.toString());
-                        pipelined.set(key, JsonUtils.marshalToString(map));
+
+                        ShardedJedis shardedJedis = shardedJedisPool.getResource();
+                        boolean broken = false;
+                        try {
+                            shardedJedis.getShard(key).set(key, JsonUtils.marshalToString(map)) ;
+                        } catch (JedisException e) {
+                            broken = true;
+                            throw  e ;
+                        } catch (Exception e) {
+                            throw  e ;
+                        } finally {
+                            RedisUtils.returnResource(shardedJedisPool , shardedJedis, broken);
+                        }
+
                     }
                 }
-
-                pipelined.sync();
             }
 
             @Override
             protected void handleDelete(List<CanalEntry.RowData> rowDatasList) {
 
-                ShardedJedisPipeline pipelined = shardedJedis.pipelined();
                 for (CanalEntry.RowData rowData : rowDatasList) {
                     List<CanalEntry.Column> beforeColumnsList = rowData.getBeforeColumnsList();
                     if (logger.isDebugEnabled()) {
@@ -133,18 +159,24 @@ public class RedisSink extends AbstractSink {
                         }
                     }
                     String key = String.format("%s_%s", tableConfig.getPureTable(), id.toString());
-                    pipelined.del(key);
+
+                    ShardedJedis shardedJedis = shardedJedisPool.getResource();
+                    boolean broken = false;
+                    try {
+                        shardedJedis.getShard(key).del(key);
+                    } catch (JedisException e) {
+                        broken = true;
+                        throw  e ;
+                    } catch (Exception e) {
+                        throw  e ;
+                    } finally {
+                        RedisUtils.returnResource(shardedJedisPool , shardedJedis, broken);
+                    }
                 }
-                pipelined.sync();
 
             }
 
         };
-    }
-
-    @Override
-    protected long getCommitBatchId() {
-        return 0;
     }
 
 }

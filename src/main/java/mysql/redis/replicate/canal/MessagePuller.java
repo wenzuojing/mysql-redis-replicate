@@ -8,10 +8,9 @@ import mysql.redis.replicate.ZookeeperUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.concurrent.ConcurrentSkipListSet;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.Iterator;
+import java.util.NavigableSet;
+import java.util.concurrent.*;
 
 /**
  * Created by wens on 15-10-15.
@@ -25,31 +24,47 @@ public class MessagePuller extends Thread implements Lifecycle {
 
     private final String destination;
 
-    private final ScheduledExecutorService scheduledExecutorService;
-
     private final com.alibaba.otter.canal.server.CanalService canalService;
 
     private final int batchSize;
 
     private final AbstractSink writer;
 
-    private final ConcurrentSkipListSet<Long> batchIds = new ConcurrentSkipListSet<>();
+    private final ScheduledFuture<?> scheduledFuture;
 
-    public MessagePuller(final int batchSize, final String destination, final com.alibaba.otter.canal.server.CanalService canalService, final AbstractSink writer) {
+    private final ConcurrentSkipListSet<Long> commitBatchIds = new ConcurrentSkipListSet() ;
+
+    private final ClientIdentity clientIdentity ;
+
+    public MessagePuller(final int batchSize, final String destination, final com.alibaba.otter.canal.server.CanalService canalService, final AbstractSink writer , ScheduledExecutorService scheduledExecutorService ) {
         this.destination = destination;
         this.canalService = canalService;
         this.batchSize = batchSize;
         this.writer = writer;
-        this.scheduledExecutorService = Executors.newScheduledThreadPool(1);
-
-        this.scheduledExecutorService.scheduleWithFixedDelay(new Runnable() {
-            @Override
-            public void run() {
-                ZookeeperUtils.writeData(ZkPathUtils.getDestinationSinkLogOffsetPath(destination), writer.getCommitBatchId(), true);
-            }
-        }, 0, 10, TimeUnit.SECONDS);
+        this.clientIdentity = new ClientIdentity(destination, (short) 1) ;
 
         setName("puller-" + this.destination + "-thread");
+        scheduledFuture = scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
+            @Override
+            public void run() {
+                try{
+                    long commitBatchId = writer.getCommitBatchId();
+                    NavigableSet<Long> batchIds = commitBatchIds.headSet(commitBatchId, false);
+                    Iterator<Long> iterator = batchIds.iterator();
+                    synchronized (canalService){
+                        while ( iterator.hasNext() ){
+                            Long batchId = iterator.next();
+                            canalService.ack(clientIdentity ,  batchId);
+                            commitBatchIds.remove(batchId);
+                        }
+                    }
+
+                }catch (Exception e){
+                    e.printStackTrace();
+                }
+
+            }
+        }, 0, 10 , TimeUnit.SECONDS);
     }
 
 
@@ -68,7 +83,7 @@ public class MessagePuller extends Thread implements Lifecycle {
             }
         }
         writer.stop();
-        scheduledExecutorService.shutdownNow();
+        scheduledFuture.cancel(true);
     }
 
 
@@ -76,12 +91,14 @@ public class MessagePuller extends Thread implements Lifecycle {
     public void run() {
 
         try {
-            ClientIdentity clientIdentity = new ClientIdentity(destination, (short) 1);
             canalService.subscribe(clientIdentity);
-            int retry = 0;
             while (running) {
+
                 Message message;
-                message = canalService.getWithoutAck(clientIdentity, this.batchSize, 100L, TimeUnit.MICROSECONDS); // 获取指定数量的数据
+                synchronized (canalService){
+                    message = canalService.getWithoutAck(clientIdentity, this.batchSize, 100L, TimeUnit.MICROSECONDS); // 获取指定数量的数据
+                }
+
 
                 long batchId = message.getId();
                 int size = message.getEntries().size();
@@ -90,28 +107,24 @@ public class MessagePuller extends Thread implements Lifecycle {
                 } else {
                     try {
                         writer.sink(message);
-                        //canalService.ack(clientIdentity, batchId); // 提交确认
-                        batchIds.add(batchId);
-                        retry = 0;
+                        delayAck(batchId) ;
                     } catch (Exception e) {
                         logger.error("Got an Exception, when sink message.", e);
-                        canalService.rollback(clientIdentity, batchId);
-                        retry++;
-                        try {
-                            Thread.sleep(5 * 1000);
-                        } catch (InterruptedException e1) {
-                            Thread.currentThread().interrupt();
+                        synchronized (canalService){
+                            canalService.rollback(clientIdentity, batchId);
                         }
-                        if (retry >= 5) {
-                            throw new RuntimeException("Retry 5 times ,but still fail.");
-                        }
+
                     }
                 }
             }
-
         } finally {
             stopped = true;
         }
     }
+
+    private void delayAck(long batchId) {
+        commitBatchIds.add(batchId);
+    }
+
 
 }

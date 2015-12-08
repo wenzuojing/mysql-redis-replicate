@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="utf-8"/>
-    <title>>mysql redis replicate web console</title>
+    <title>mysql redis replicate web console</title>
     <link href="css/bootstrap.css" rel="stylesheet">
 
     <style>
@@ -22,10 +22,9 @@
     <thead>
     <tr>
         <th>Destination</th>
-        <th>MySQL Log Offset</th>
-        <th>Sink Log Offset</th>
         <th>Run On</th>
         <th>Run Fail</th>
+        <th>Monitor</th>
         <th></th>
     </tr>
 
@@ -45,10 +44,9 @@
 
     var tpl = '<tr>' +
             '<td>#destination</td>' +
-            '<td>#mysqlLogOffset</td>' +
-            '<td>#sinkLogOffset</td>' +
             '<td>#runOn</td>' +
             '<td>#runFail</td>' +
+            '<td><a href="#monitorUrl" target="_blank"> monitor </a></td>' +
             '<td> <button type="button" onclick="edit(\'#destination\')">EDIT</button> <button type="button" onclick="opt(this , \'#destination\')" >DELETE</button> <button type="button" onclick="opt(this , \'#destination\')" >#status</button> </td>' +
             '</tr>'
 
@@ -115,11 +113,10 @@
         $(data).each(function () {
             var status = this.stopped ? "START" : "STOP";
             var html = tpl.replace(/#destination/g, this.destination).
-            replace("#mysqlLogOffset", this.mysqlLogOffset).
-            replace("#sinkLogOffset", this.sinkLogOffset).
             replace("#runOn", !this.runOn ? "N/A" : this.runOn).
             replace("#runFail", this.runFail).
-            replace("#status", status)
+            replace("#status", status).
+            replace("#monitorUrl", this.monitorUrl)
             $("#all-destinations").append($(html))
         })
 

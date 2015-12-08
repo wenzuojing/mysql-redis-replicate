@@ -5,12 +5,14 @@ import com.alibaba.otter.canal.protocol.Message;
 import com.google.common.collect.Maps;
 import mysql.redis.replicate.Lifecycle;
 import mysql.redis.replicate.LoggerFactory;
+import mysql.redis.replicate.Monitor;
 import mysql.redis.replicate.config.DestinationConfig;
 import org.slf4j.Logger;
 
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -58,12 +60,11 @@ public abstract class AbstractSink implements MessageSink, Lifecycle {
                 } catch (Exception e) {
                     throw new RuntimeException("parse event has an error , data:" + entry.toString(), e);
                 }
-
-                sinkWorkerMap.get(tableConfig.getTableName()).push(rowChange);
-
+                sinkWorkerMap.get(tableConfig.getTableName()).push(new RowChangeWrapper(rowChange ,message.getId() ));
             }
-
+            Monitor.updateLogPosition(destinationConfig.getDestination() , entry.getHeader().getLogfileName() , entry.getHeader().getLogfileOffset() );
         }
+
     }
 
     @Override
@@ -77,15 +78,18 @@ public abstract class AbstractSink implements MessageSink, Lifecycle {
 
         protected volatile boolean stopped = false;
 
+        protected volatile long commitBatchId = Long.MAX_VALUE ;
+
         protected DestinationConfig.TableConfig tableConfig;
 
-        protected BlockingQueue<CanalEntry.RowChange> rowChangeQueue;
+        protected BlockingQueue<RowChangeWrapper> rowChangeQueue;
 
         protected SinkWorker(DestinationConfig.TableConfig tableConfig) {
             this.tableConfig = tableConfig;
+            this.rowChangeQueue = new LinkedBlockingQueue<>(100000) ;
         }
 
-        public void push(CanalEntry.RowChange rowChange) {
+        public void push(RowChangeWrapper rowChange) {
             try {
                 rowChangeQueue.put(rowChange);
             } catch (InterruptedException e) {
@@ -97,7 +101,7 @@ public abstract class AbstractSink implements MessageSink, Lifecycle {
         public void run() {
 
             while (!stopped) {
-                CanalEntry.RowChange rowChange = null;
+                RowChangeWrapper rowChange = null;
 
                 try {
                     rowChange = rowChangeQueue.poll(100, TimeUnit.MILLISECONDS);
@@ -106,24 +110,41 @@ public abstract class AbstractSink implements MessageSink, Lifecycle {
                 }
                 if (rowChange != null) {
 
-                    CanalEntry.EventType eventType = rowChange.getEventType();
 
-                    if (eventType == CanalEntry.EventType.INSERT) {
-                        handleInsert(rowChange.getRowDatasList());
-                        continue;
+                    CanalEntry.EventType eventType = rowChange.rowChange.getEventType();
+                    int retry = 0 ;
+                    while (retry <= 5 ){
+                        try{
+                            doSink(rowChange.rowChange, eventType);
+                            break;
+                        }catch (Exception e){
+                            logger.error("doSink fail : retry = "+retry+",tableName=" + tableConfig.getTableName() , e );
+                            retry++;
+                            try {
+                                Thread.sleep(retry * 100 );
+                            } catch (InterruptedException e1) {
+                                Thread.currentThread().interrupt();
+                            }
+                        }
                     }
-
-                    if (eventType == CanalEntry.EventType.UPDATE) {
-                        handleUpdate(rowChange.getRowDatasList());
-                        continue;
-                    }
-
-                    if (eventType == CanalEntry.EventType.DELETE) {
-                        handleDelete(rowChange.getRowDatasList());
-                        continue;
-                    }
+                    commitBatchId = rowChange.batchId ;
+                }else{
+                    commitBatchId = Long.MAX_VALUE ;
                 }
 
+            }
+        }
+
+        private void doSink(CanalEntry.RowChange rowChange, CanalEntry.EventType eventType) {
+            if (eventType == CanalEntry.EventType.INSERT) {
+                //handleInsert(rowChange.getRowDatasList());
+                Monitor.incrInsertCount(destinationConfig.getDestination(), 1);
+            }else if (eventType == CanalEntry.EventType.UPDATE) {
+                handleUpdate(rowChange.getRowDatasList());
+                Monitor.incrUpdateCount(destinationConfig.getDestination(), 1);
+            }else if (eventType == CanalEntry.EventType.DELETE) {
+                handleDelete(rowChange.getRowDatasList());
+                Monitor.incrDeleteCount(destinationConfig.getDestination(), 1);
             }
         }
 
@@ -159,7 +180,28 @@ public abstract class AbstractSink implements MessageSink, Lifecycle {
             stopped = true;
         }
 
+        public long getCommitBatchId() {
+            return commitBatchId;
+        }
     }
 
-    protected abstract long getCommitBatchId();
+    protected long getCommitBatchId() {
+
+        long min = Long.MAX_VALUE;
+
+        for (SinkWorker sinkWorker : sinkWorkerMap.values()) {
+            min = Math.min(min, sinkWorker.getCommitBatchId());
+        }
+        return min;
+    }
+
+    static  class RowChangeWrapper {
+        CanalEntry.RowChange rowChange ;
+        long batchId ;
+
+        public RowChangeWrapper(CanalEntry.RowChange rowChange, long batchId) {
+            this.rowChange = rowChange;
+            this.batchId = batchId;
+        }
+    }
 }
