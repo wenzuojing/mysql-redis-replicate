@@ -2,11 +2,13 @@ package mysql.redis.replicate.canal;
 
 import com.alibaba.otter.canal.protocol.ClientIdentity;
 import com.alibaba.otter.canal.protocol.Message;
+import mysql.redis.replicate.Lifecycle;
 import mysql.redis.replicate.ZkPathUtils;
 import mysql.redis.replicate.ZookeeperUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -14,7 +16,7 @@ import java.util.concurrent.TimeUnit;
 /**
  * Created by wens on 15-10-15.
  */
-public class MessagePuller extends Thread {
+public class MessagePuller extends Thread implements Lifecycle {
 
     private final static Logger logger = LoggerFactory.getLogger(ControllerService.class);
 
@@ -31,6 +33,8 @@ public class MessagePuller extends Thread {
 
     private final AbstractSink writer;
 
+    private final ConcurrentSkipListSet<Long> batchIds = new ConcurrentSkipListSet<>();
+
     public MessagePuller(final int batchSize, final String destination, final com.alibaba.otter.canal.server.CanalService canalService, final AbstractSink writer) {
         this.destination = destination;
         this.canalService = canalService;
@@ -41,9 +45,9 @@ public class MessagePuller extends Thread {
         this.scheduledExecutorService.scheduleWithFixedDelay(new Runnable() {
             @Override
             public void run() {
-                ZookeeperUtils.writeData(ZkPathUtils.getDestinationSinkLogOffsetPath(destination), writer.getSinkLogOffset(), true);
+                ZookeeperUtils.writeData(ZkPathUtils.getDestinationSinkLogOffsetPath(destination), writer.getCommitBatchId(), true);
             }
-        }, 0, 30, TimeUnit.SECONDS);
+        }, 0, 10, TimeUnit.SECONDS);
 
         setName("puller-" + this.destination + "-thread");
     }
@@ -63,8 +67,8 @@ public class MessagePuller extends Thread {
                 Thread.currentThread().interrupt();
             }
         }
-        writer.stopSafe();
-        scheduledExecutorService.shutdown();
+        writer.stop();
+        scheduledExecutorService.shutdownNow();
     }
 
 
@@ -86,7 +90,8 @@ public class MessagePuller extends Thread {
                 } else {
                     try {
                         writer.sink(message);
-                        canalService.ack(clientIdentity, batchId); // 提交确认
+                        //canalService.ack(clientIdentity, batchId); // 提交确认
+                        batchIds.add(batchId);
                         retry = 0;
                     } catch (Exception e) {
                         logger.error("Got an Exception, when sink message.", e);
@@ -108,4 +113,5 @@ public class MessagePuller extends Thread {
             stopped = true;
         }
     }
+
 }

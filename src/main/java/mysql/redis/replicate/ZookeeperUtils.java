@@ -7,6 +7,7 @@ import org.I0Itec.zkclient.IZkDataListener;
 import org.I0Itec.zkclient.IZkStateListener;
 import org.I0Itec.zkclient.ZkClient;
 import org.I0Itec.zkclient.exception.ZkException;
+import org.I0Itec.zkclient.serialize.BytesPushThroughSerializer;
 
 import java.util.List;
 
@@ -20,11 +21,10 @@ public class ZookeeperUtils {
     public static void init(Conf conf) {
         zkClient = openClient(conf.getZookeeperServer());
         ZkPathUtils.init(conf.getZookeeperRootPath(), zkClient);
-        ;
     }
 
     public static ZkClient openClient(String zkServer) {
-        return new ZkClient(zkServer, 5000);
+        return new ZkClient(zkServer, 10000, 10000, new BytesPushThroughSerializer());
     }
 
     public static List<String> getChildren(String path) {

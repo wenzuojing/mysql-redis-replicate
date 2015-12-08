@@ -22,14 +22,10 @@
     <thead>
     <tr>
         <th>Destination</th>
-        <th>MySQL Status</th>
-        <th>Sync Status</th>
+        <th>MySQL Log Offset</th>
+        <th>Sink Log Offset</th>
         <th>Run On</th>
         <th>Run Fail</th>
-        <th>Insert Count</th>
-        <th>Update Count</th>
-        <th>Delete Count</th>
-        <th>Handle Speed</th>
         <th></th>
     </tr>
 
@@ -49,14 +45,10 @@
 
     var tpl = '<tr>' +
             '<td>#destination</td>' +
-            '<td>#mysqlStatus</td>' +
-            '<td>#syncStatus</td>' +
+            '<td>#mysqlLogOffset</td>' +
+            '<td>#sinkLogOffset</td>' +
             '<td>#runOn</td>' +
             '<td>#runFail</td>' +
-            '<td>#insertCount</td>' +
-            '<td>#updateCount</td>' +
-            '<td>#deleteCount</td>' +
-            '<td>#handleSpeed</td>' +
             '<td> <button type="button" onclick="edit(\'#destination\')">EDIT</button> <button type="button" onclick="opt(this , \'#destination\')" >DELETE</button> <button type="button" onclick="opt(this , \'#destination\')" >#status</button> </td>' +
             '</tr>'
 
@@ -123,14 +115,10 @@
         $(data).each(function () {
             var status = this.stopped ? "START" : "STOP";
             var html = tpl.replace(/#destination/g, this.destination).
-            replace("#mysqlStatus", this.mysqlStatus).
-            replace("#syncStatus", this.syncStatus).
+            replace("#mysqlLogOffset", this.mysqlLogOffset).
+            replace("#sinkLogOffset", this.sinkLogOffset).
             replace("#runOn", !this.runOn ? "N/A" : this.runOn).
             replace("#runFail", this.runFail).
-            replace("#insertCount", this.insertCount).
-            replace("#updateCount", this.updateCount).
-            replace("#deleteCount", this.deleteCount).
-            replace("#handleSpeed", this.handleSpeed).
             replace("#status", status)
             $("#all-destinations").append($(html))
         })

@@ -6,11 +6,9 @@ import com.alibaba.otter.canal.instance.core.CanalInstanceGenerator;
 import com.alibaba.otter.canal.instance.manager.CanalInstanceWithManager;
 import com.alibaba.otter.canal.instance.manager.model.Canal;
 import com.alibaba.otter.canal.instance.manager.model.CanalParameter;
-import com.alibaba.otter.canal.protocol.position.LogPosition;
 import com.alibaba.otter.canal.server.embedded.CanalServerWithEmbedded;
 import mysql.redis.replicate.Conf;
 import mysql.redis.replicate.LoggerFactory;
-import mysql.redis.replicate.ZkPathUtils;
 import mysql.redis.replicate.ZookeeperUtils;
 import mysql.redis.replicate.config.DestinationConfig;
 import mysql.redis.replicate.config.DestinationConfigManager;
@@ -76,7 +74,7 @@ public class ControllerService {
             task.safeStop();
         }
         server.start(destination);
-        MessagePuller puller = new MessagePuller(conf.getCanalBatchSize(), destination, server, new RedisSink(destinationConfig, conf.getJedisPoolConfig()));
+        MessagePuller puller = new MessagePuller(conf.getCanalBatchSize(), destination, server, new RedisSink(destinationConfig));
         puller.start();
         runningTasks.put(destination, puller);
         logger.info("## Started destination task:" + destinationConfig.getDestination());
@@ -164,19 +162,6 @@ public class ControllerService {
     }
 
     private void recovery(DestinationConfig destinationConfig) {
-        String sinkLogOffset = ZookeeperUtils.readData(ZkPathUtils.getDestinationSinkLogOffsetPath(destinationConfig.getDestination()), String.class);
-        if (sinkLogOffset != null && !"n/a".equals(sinkLogOffset)) {
-            String canalCursor = ZookeeperPathUtils.getCursorPath(destinationConfig.getDestination(), (short) 1);
-
-            LogPosition logPosition = ZookeeperUtils.readData(canalCursor, LogPosition.class);
-            if (logPosition != null) {
-                String[] sinkLogNameAndOffset = sinkLogOffset.split(":");
-                logPosition.getPostion().setJournalName(sinkLogNameAndOffset[0]);
-                logPosition.getPostion().setPosition(Long.parseLong(sinkLogNameAndOffset[1]));
-                ZookeeperUtils.writeData(canalCursor, logPosition, true);
-            }
-
-        }
         ZookeeperUtils.deleteRecursive(ZookeeperPathUtils.getBatchMarkPath(destinationConfig.getDestination(), (short) 1));
     }
 

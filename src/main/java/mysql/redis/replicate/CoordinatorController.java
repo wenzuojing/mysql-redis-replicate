@@ -4,6 +4,8 @@ import com.alibaba.otter.canal.common.utils.AddressUtils;
 import mysql.redis.replicate.config.DestinationConfig;
 import mysql.redis.replicate.config.DestinationConfigManager;
 import org.I0Itec.zkclient.IZkChildListener;
+import org.I0Itec.zkclient.IZkStateListener;
+import org.apache.zookeeper.Watcher;
 import org.slf4j.Logger;
 
 import java.util.List;
@@ -36,6 +38,23 @@ public class CoordinatorController implements ZookeeperLeaderElector.LeaderListe
         zookeeperLeaderElector.start();
         ServerInfo serverInfo = new ServerInfo(myId, AddressUtils.getHostIp(), httpEndpoint, System.currentTimeMillis());
         ZookeeperUtils.createEphemeral(ZkPathUtils.getIdsPath(myId), serverInfo);
+        ZookeeperUtils.subscribeStateChanges(new IZkStateListener() {
+            @Override
+            public void handleStateChanged(Watcher.Event.KeeperState state) throws Exception {
+                System.out.println("----");
+            }
+
+            @Override
+            public void handleNewSession() throws Exception {
+
+                try {
+                    ZookeeperUtils.createEphemeral(ZkPathUtils.getIdsPath(myId), serverInfo);
+                } catch (Exception e) {
+                    logger.error("Create ephemeral path fail : " + ZkPathUtils.getIdsPath(myId));
+                }
+
+            }
+        });
         this.aliveServerIds = ZookeeperUtils.getChildren(ZkPathUtils.getIdsPath());
     }
 
@@ -124,31 +143,37 @@ public class CoordinatorController implements ZookeeperLeaderElector.LeaderListe
             List<DestinationConfig> allDestinationConfig = destinationConfigManager.getAllDestinationConfig();
 
             for (DestinationConfig destinationConfig : allDestinationConfig) {
-                if (!destinationConfig.isStopped() && !currentChilds.contains(destinationConfig.getRunOn())) {
-                    Random random = new Random();
-                    String newServerId = currentChilds.get(random.nextInt(currentChilds.size()));
-                    ServerInfo serverInfo = getServerInfo(newServerId);
-                    boolean fail = true;
-                    int retry = 0;
-                    while (retry <= 2) {
-                        try {
-                            String ret = HttpClientUtils.post(serverInfo.getHttpEndpoint(), Tuple.of("cmd", "start"), Tuple.of("destination", destinationConfig.getDestination()));
-                            if ("ok".equals(ret)) {
-                                fail = false;
-                                break;
-                            }
-                        } catch (Exception e) {
-                            logger.error("Retry " + retry + " Run destination fail : dest=" + destinationConfig.getDestination() + ",serverId = " + serverInfo.getId(), e);
-                            retry++;
-                        }
+                if (!destinationConfig.isStopped()) {
+                    String serverId = destinationConfig.getRunOn();
+                    if (!currentChilds.contains(destinationConfig.getRunOn())) {
+                        Random random = new Random();
+                        serverId = currentChilds.get(random.nextInt(currentChilds.size()));
                     }
-
+                    ServerInfo serverInfo = getServerInfo(serverId);
+                    boolean fail = invokeEndpointForStart(destinationConfig, serverInfo);
                     destinationConfig.setRunOn(serverInfo.id);
                     destinationConfig.setRunFail(fail);
                     destinationConfigManager.saveOrUpdate(destinationConfig);
-
                 }
             }
+        }
+
+        private boolean invokeEndpointForStart(DestinationConfig destinationConfig, ServerInfo serverInfo) {
+            boolean fail = true;
+            int retry = 0;
+            while (retry <= 2) {
+                try {
+                    String ret = HttpClientUtils.post(serverInfo.getHttpEndpoint(), Tuple.of("cmd", "start"), Tuple.of("destination", destinationConfig.getDestination()));
+                    if ("ok".equals(ret)) {
+                        fail = false;
+                        break;
+                    }
+                } catch (Exception e) {
+                    logger.error("Retry " + retry + " Run destination fail : dest=" + destinationConfig.getDestination() + ",serverId = " + serverInfo.getId(), e);
+                    retry++;
+                }
+            }
+            return fail;
         }
     }
 

@@ -1,4 +1,4 @@
-import com.gone.mysql.redis.replicate.groovy.IRow2map
+import mysql.redis.replicate.groovy.IRow2map
 
 import java.text.ParseException
 import java.text.SimpleDateFormat;

@@ -57,14 +57,14 @@ public class AllDestinationServlet extends HttpServlet {
             String mysqlLogOffset = masterBinlogPosition == null ? "" : masterBinlogPosition.getOne() + ":" + masterBinlogPosition.getTwo();
 
             String sinkOffset = ZookeeperUtils.readData(ZkPathUtils.getDestinationSinkLogOffsetPath(dest), String.class);
-            if (sinkOffset != null) {
+            if (sinkOffset == null) {
                 sinkOffset = "n/a";
             }
 
             HashMap<String, Object> map = Maps.newHashMap();
             map.put("destination", dest);
             map.put("mysqlLogOffset", mysqlLogOffset);
-            map.put("sinkStatus", sinkOffset);
+            map.put("sinkLogOffset", sinkOffset);
             map.put("stopped", config.isStopped());
             map.put("runOn", config.getRunOn());
             map.put("runFail", config.isRunFail());
