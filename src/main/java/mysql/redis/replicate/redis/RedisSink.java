@@ -17,12 +17,12 @@ import redis.clients.jedis.ShardedJedis;
 import redis.clients.jedis.ShardedJedisPool;
 import redis.clients.jedis.exceptions.JedisException;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Created by wens on 15-12-3.
@@ -59,7 +59,7 @@ public class RedisSink extends AbstractSink {
                 ShardedJedis shardedJedis = shardedJedisPool.getResource();
                 boolean broken = false;
                 try {
-                    Map<Jedis, PilelineSyncTask> jedisPipelineMap = Maps.newHashMap();
+                    Map<Jedis, PipelineSyncTask> jedisPipelineMap = Maps.newHashMap();
                     for (CanalEntry.RowData rowData : rowDatasList) {
                         List<CanalEntry.Column> afterColumnsList = rowData.getAfterColumnsList();
 
@@ -85,14 +85,14 @@ public class RedisSink extends AbstractSink {
                         }
                         String key = String.format("%s_%s", tableConfig.getPureTable(), id.toString());
                         Jedis jedis = shardedJedis.getShard(key);
-                        PilelineSyncTask pilelineSyncTask = jedisPipelineMap.get(jedis);
+                        PipelineSyncTask pilelineSyncTask = jedisPipelineMap.get(jedis);
                         if (pilelineSyncTask == null) {
-                            pilelineSyncTask = new PilelineSyncTask(jedis.pipelined());
+                            pilelineSyncTask = new PipelineSyncTask(jedis.pipelined());
                             jedisPipelineMap.put(jedis, pilelineSyncTask);
                         }
                         pilelineSyncTask.pipeline.set(key, JsonUtils.marshalToString(map));
                     }
-                    executorService.invokeAll(jedisPipelineMap.values());
+                    executorService.invokeAll(jedisPipelineMap.values() , 1, TimeUnit.MINUTES );
                 } catch (JedisException e) {
                     broken = true;
                     throw e;
@@ -161,7 +161,7 @@ public class RedisSink extends AbstractSink {
                 for (CanalEntry.RowData rowData : rowDatasList) {
                     List<CanalEntry.Column> beforeColumnsList = rowData.getBeforeColumnsList();
                     if (logger.isDebugEnabled()) {
-                        logger.debug("{} receive delete data :\n", tableConfig.getTableName(), toString(beforeColumnsList));
+                        logger.debug("{} receive delete data :\n {}", tableConfig.getTableName(), toString(beforeColumnsList));
                     }
                     StringBuilder id = new StringBuilder();
                     for (CanalEntry.Column c : beforeColumnsList) {
@@ -184,18 +184,21 @@ public class RedisSink extends AbstractSink {
                 }
             }
 
-
-
+            @Override
+            public void stop() {
+                super.stop();
+                executorService.shutdownNow();
+            }
         };
     }
 
 
 
-    private class PilelineSyncTask implements Callable<Void> {
+    private class PipelineSyncTask implements Callable<Void> {
 
         Pipeline pipeline ;
 
-        PilelineSyncTask(Pipeline pipeline ){
+        PipelineSyncTask(Pipeline pipeline){
             this.pipeline = pipeline ;
         }
 

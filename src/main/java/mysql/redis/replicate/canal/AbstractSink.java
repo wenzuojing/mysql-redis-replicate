@@ -86,7 +86,7 @@ public abstract class AbstractSink implements MessageSink, Lifecycle {
 
         protected SinkWorker(DestinationConfig.TableConfig tableConfig) {
             this.tableConfig = tableConfig;
-            this.rowChangeQueue = new LinkedBlockingQueue<>(100000) ;
+            this.rowChangeQueue = new LinkedBlockingQueue<>(10000) ;
         }
 
         public void push(RowChangeWrapper rowChange) {
@@ -137,7 +137,7 @@ public abstract class AbstractSink implements MessageSink, Lifecycle {
 
         private void doSink(CanalEntry.RowChange rowChange, CanalEntry.EventType eventType) {
             if (eventType == CanalEntry.EventType.INSERT) {
-                //handleInsert(rowChange.getRowDatasList());
+                handleInsert(rowChange.getRowDatasList());
                 Monitor.incrInsertCount(destinationConfig.getDestination(), 1);
             }else if (eventType == CanalEntry.EventType.UPDATE) {
                 handleUpdate(rowChange.getRowDatasList());

@@ -43,8 +43,14 @@ public class AllDestinationServlet extends HttpServlet {
         for (String dest : allDestination) {
 
             DestinationConfig config = destinationConfigManager.getDestinationConfig(dest);
+
+            String monitorUrl = "";
+
             CoordinatorController.ServerInfo serverInfo = ZookeeperUtils.readData(ZkPathUtils.getIdsPath(config.getRunOn()), CoordinatorController.ServerInfo.class);
-            String monitorUrl = String.format("%s?destination=%s&mysqlAddress=%s&mysqlUser=%s&mysqlPassword=%s" , serverInfo.getHttpEndpoint().replace("endpoint" , "monitor"), config.getDestination() , config.getDbAddress(), config.getDbUser(),config.getDbPassword()) ;
+            if(serverInfo != null ){
+                monitorUrl = String.format("%s?destination=%s&mysqlAddress=%s&mysqlUser=%s&mysqlPassword=%s", serverInfo.getHttpEndpoint().replace("endpoint", "monitor"), config.getDestination(), config.getDbAddress(), config.getDbUser(), config.getDbPassword()) ;
+            }
+
             HashMap<String, Object> map = Maps.newHashMap();
             map.put("destination", dest);
             map.put("stopped", config.isStopped());

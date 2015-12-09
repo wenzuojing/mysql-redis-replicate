@@ -3,9 +3,8 @@ package mysql.redis.replicate.redis;
 import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
 import redis.clients.jedis.*;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Created by wens on 15-12-4.
@@ -13,6 +12,7 @@ import java.util.Map;
 public class RedisUtils {
 
     public static ShardedJedisPool createSharedJedisPool(GenericObjectPoolConfig config, String redisInfos, String redisPassword) {
+        
         if (config == null) {
             config = new JedisPoolConfig();
         }
@@ -85,15 +85,6 @@ public class RedisUtils {
                 shardedJedisPool.returnResource(shardedJedis);
             }
         }
-    }
-
-    public static void main(String[] args) {
-
-
-        ShardedJedis sharedJedis = createSharedJedis("172.16.1.152,172.16.1.153", null);
-
-        String s = sharedJedis.getShard("user_8716184").get("user_8716184");
-        System.out.println(s);
     }
 
 
