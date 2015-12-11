@@ -77,6 +77,7 @@ public abstract class AbstractSink implements MessageSink, Lifecycle {
     protected abstract class SinkWorker implements Runnable, Lifecycle {
 
         protected volatile boolean stopped = false;
+        protected volatile boolean running = true;
 
         protected volatile long commitBatchId = Long.MAX_VALUE ;
 
@@ -101,50 +102,56 @@ public abstract class AbstractSink implements MessageSink, Lifecycle {
         public void run() {
 
             while (!stopped) {
-                RowChangeWrapper rowChange = null;
-
-                try {
-                    rowChange = rowChangeQueue.poll(100, TimeUnit.MILLISECONDS);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
+                try{
+                    doRun();
+                }catch (Exception e){
+                    logger.error("doRun fail",e);
                 }
-                if (rowChange != null) {
+            }
 
+            running = false ;
+        }
 
-                    CanalEntry.EventType eventType = rowChange.rowChange.getEventType();
-                    int retry = 0 ;
-                    while (retry <= 5 ){
-                        try{
-                            doSink(rowChange.rowChange, eventType);
-                            break;
-                        }catch (Exception e){
-                            logger.error("doSink fail : retry = "+retry+",tableName=" + tableConfig.getTableName() , e );
-                            retry++;
-                            try {
-                                Thread.sleep(retry * 100 );
-                            } catch (InterruptedException e1) {
-                                Thread.currentThread().interrupt();
-                            }
+        private void doRun() {
+            RowChangeWrapper rowChange = null;
+            try {
+                rowChange = rowChangeQueue.poll(100, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            if (rowChange != null) {
+                CanalEntry.EventType eventType = rowChange.rowChange.getEventType();
+                int retry = 0 ;
+                while (retry <= 5 ){
+                    try{
+                        doSink(rowChange.rowChange, eventType);
+                        break;
+                    }catch (Exception e){
+                        logger.error("doSink fail : retry = "+retry+",tableName=" + tableConfig.getTableName() , e );
+                        retry++;
+                        try {
+                            Thread.sleep(retry * 100 );
+                        } catch (InterruptedException e1) {
+                            Thread.currentThread().interrupt();
                         }
                     }
-                    commitBatchId = rowChange.batchId ;
-                }else{
-                    commitBatchId = Long.MAX_VALUE ;
                 }
-
+                commitBatchId = rowChange.batchId ;
+            }else{
+                commitBatchId = Long.MAX_VALUE ;
             }
         }
 
         private void doSink(CanalEntry.RowChange rowChange, CanalEntry.EventType eventType) {
             if (eventType == CanalEntry.EventType.INSERT) {
                 handleInsert(rowChange.getRowDatasList());
-                Monitor.incrInsertCount(destinationConfig.getDestination(), 1);
+                Monitor.incrInsertCount(destinationConfig.getDestination(), rowChange.getRowDatasCount());
             }else if (eventType == CanalEntry.EventType.UPDATE) {
                 handleUpdate(rowChange.getRowDatasList());
-                Monitor.incrUpdateCount(destinationConfig.getDestination(), 1);
+                Monitor.incrUpdateCount(destinationConfig.getDestination(), rowChange.getRowDatasCount());
             }else if (eventType == CanalEntry.EventType.DELETE) {
                 handleDelete(rowChange.getRowDatasList());
-                Monitor.incrDeleteCount(destinationConfig.getDestination(), 1);
+                Monitor.incrDeleteCount(destinationConfig.getDestination(), rowChange.getRowDatasCount());
             }
         }
 
@@ -178,6 +185,13 @@ public abstract class AbstractSink implements MessageSink, Lifecycle {
         @Override
         public void stop() {
             stopped = true;
+            while (running ){
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
         }
 
         public long getCommitBatchId() {

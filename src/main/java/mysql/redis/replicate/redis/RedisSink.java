@@ -51,7 +51,7 @@ public class RedisSink extends AbstractSink {
         return new AbstractSink.SinkWorker(tableConfig) {
             private final ShardedJedisPool shardedJedisPool = RedisUtils.createSharedJedisPool(redisConfig, tableConfig.getRedisInfos(), tableConfig.getRedisPassword());
 
-            private final ExecutorService executorService = Executors.newCachedThreadPool(Threads.makeThreadFactory("redis-sync-thread")) ;
+            private final ExecutorService executorService = Executors.newCachedThreadPool(Threads.makeThreadFactory("redis-sync-thread"));
 
             @Override
             protected void handleInsert(List<CanalEntry.RowData> rowDatasList) {
@@ -92,13 +92,13 @@ public class RedisSink extends AbstractSink {
                         }
                         pilelineSyncTask.pipeline.set(key, JsonUtils.marshalToString(map));
                     }
-                    executorService.invokeAll(jedisPipelineMap.values() , 1, TimeUnit.MINUTES );
+                    executorService.invokeAll(jedisPipelineMap.values(), 1, TimeUnit.MINUTES);
                 } catch (JedisException e) {
                     broken = true;
                     throw e;
-                }catch (Exception e){
-                    throw new RuntimeException(e) ;
-                }finally {
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                } finally {
                     RedisUtils.returnResource(shardedJedisPool, shardedJedis, broken);
                 }
 
@@ -109,97 +109,117 @@ public class RedisSink extends AbstractSink {
             @Override
             protected void handleUpdate(List<CanalEntry.RowData> rowDatasList) {
 
-                for (CanalEntry.RowData rowData : rowDatasList) {
+                ShardedJedis shardedJedis = shardedJedisPool.getResource();
+                boolean broken = false;
+                try {
+                    Map<Jedis, PipelineSyncTask> jedisPipelineMap = Maps.newHashMap();
 
-                    List<CanalEntry.Column> afterColumnsList = rowData.getAfterColumnsList();
-                    if (logger.isDebugEnabled()) {
-                        logger.debug("{} receive update data:\n{}", tableConfig.getTableName(), toString(afterColumnsList));
+                    for (CanalEntry.RowData rowData : rowDatasList) {
+
+                        List<CanalEntry.Column> afterColumnsList = rowData.getAfterColumnsList();
+                        if (logger.isDebugEnabled()) {
+                            logger.debug("{} receive update data:\n{}", tableConfig.getTableName(), toString(afterColumnsList));
+                        }
+                        boolean drop = true;
+                        StringBuilder id = new StringBuilder();
+                        Map<String, String> row = Maps.newHashMap();
+                        Map<String, String> rowType = Maps.newHashMap();
+                        for (CanalEntry.Column c : afterColumnsList) {
+                            if (c.getIsKey()) {
+                                id.append(c.getValue());
+                            }
+
+                            if (c.getUpdated()) {
+                                drop = false;
+                            }
+
+                            row.put(c.getName(), c.getValue());
+                            rowType.put(c.getName(), c.getMysqlType().toUpperCase());
+                        }
+                        if (!drop) {
+                            IRow2map row2document = row2mapManager.get(tableConfig.getTableName());
+                            Map<String, String> map = Maps.newHashMap();
+                            row2document.convert(rowType, row, map);
+                            if (map.isEmpty()) {
+                                return;
+                            }
+                            String key = String.format("%s_%s", tableConfig.getPureTable(), id.toString());
+
+                            Jedis jedis = shardedJedis.getShard(key);
+                            PipelineSyncTask pilelineSyncTask = jedisPipelineMap.get(jedis);
+                            if (pilelineSyncTask == null) {
+                                pilelineSyncTask = new PipelineSyncTask(jedis.pipelined());
+                                jedisPipelineMap.put(jedis, pilelineSyncTask);
+                            }
+                            pilelineSyncTask.pipeline.set(key, JsonUtils.marshalToString(map));
+                        }
                     }
-                    boolean drop = true;
-                    StringBuilder id = new StringBuilder();
-                    Map<String, String> row = Maps.newHashMap();
-                    Map<String, String> rowType = Maps.newHashMap();
-                    for (CanalEntry.Column c : afterColumnsList) {
-                        if (c.getIsKey()) {
-                            id.append(c.getValue());
-                        }
-
-                        if (c.getUpdated()) {
-                            drop = false;
-                        }
-
-                        row.put(c.getName(), c.getValue());
-                        rowType.put(c.getName(), c.getMysqlType().toUpperCase());
-                    }
-                    if (!drop) {
-                        IRow2map row2document = row2mapManager.get(tableConfig.getTableName());
-                        Map<String, String> map = Maps.newHashMap();
-                        row2document.convert(rowType, row, map);
-                        if (map.isEmpty()) {
-                            return;
-                        }
-                        String key = String.format("%s_%s", tableConfig.getPureTable(), id.toString());
-
-                        ShardedJedis shardedJedis = shardedJedisPool.getResource();
-                        boolean broken = false;
-                        try {
-                            shardedJedis.getShard(key).set(key, JsonUtils.marshalToString(map));
-                        } catch (JedisException e) {
-                            broken = true;
-                            throw e;
-                        } finally {
-                            RedisUtils.returnResource(shardedJedisPool, shardedJedis, broken);
-                        }
-
-                    }
+                    executorService.invokeAll(jedisPipelineMap.values(), 1, TimeUnit.MINUTES);
+                } catch (JedisException e) {
+                    broken = true;
+                    throw e;
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                } finally {
+                    RedisUtils.returnResource(shardedJedisPool, shardedJedis, broken);
                 }
             }
 
             @Override
             protected void handleDelete(List<CanalEntry.RowData> rowDatasList) {
 
-                for (CanalEntry.RowData rowData : rowDatasList) {
-                    List<CanalEntry.Column> beforeColumnsList = rowData.getBeforeColumnsList();
-                    if (logger.isDebugEnabled()) {
-                        logger.debug("{} receive delete data :\n {}", tableConfig.getTableName(), toString(beforeColumnsList));
-                    }
-                    StringBuilder id = new StringBuilder();
-                    for (CanalEntry.Column c : beforeColumnsList) {
-                        if (c.getIsKey()) {
-                            id.append(c.getValue());
+                ShardedJedis shardedJedis = shardedJedisPool.getResource();
+                boolean broken = false;
+                try {
+                    Map<Jedis, PipelineSyncTask> jedisPipelineMap = Maps.newHashMap();
+                    for (CanalEntry.RowData rowData : rowDatasList) {
+                        List<CanalEntry.Column> beforeColumnsList = rowData.getBeforeColumnsList();
+                        if (logger.isDebugEnabled()) {
+                            logger.debug("{} receive delete data :\n {}", tableConfig.getTableName(), toString(beforeColumnsList));
                         }
-                    }
-                    String key = String.format("%s_%s", tableConfig.getPureTable(), id.toString());
+                        StringBuilder id = new StringBuilder();
+                        for (CanalEntry.Column c : beforeColumnsList) {
+                            if (c.getIsKey()) {
+                                id.append(c.getValue());
+                            }
+                        }
+                        String key = String.format("%s_%s", tableConfig.getPureTable(), id.toString());
 
-                    ShardedJedis shardedJedis = shardedJedisPool.getResource();
-                    boolean broken = false;
-                    try {
-                        shardedJedis.getShard(key).del(key);
-                    } catch (JedisException e) {
-                        broken = true;
-                        throw e;
-                    } finally {
-                        RedisUtils.returnResource(shardedJedisPool, shardedJedis, broken);
+                        Jedis jedis = shardedJedis.getShard(key);
+                        PipelineSyncTask pilelineSyncTask = jedisPipelineMap.get(jedis);
+                        if (pilelineSyncTask == null) {
+                            pilelineSyncTask = new PipelineSyncTask(jedis.pipelined());
+                            jedisPipelineMap.put(jedis, pilelineSyncTask);
+                        }
+                        pilelineSyncTask.pipeline.del(key);
                     }
+                    executorService.invokeAll(jedisPipelineMap.values(), 1, TimeUnit.MINUTES);
+                } catch (JedisException e) {
+                    broken = true;
+                    throw e;
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                } finally {
+                    RedisUtils.returnResource(shardedJedisPool, shardedJedis, broken);
                 }
             }
 
             @Override
             public void stop() {
                 super.stop();
-                executorService.shutdownNow();
+                executorService.shutdown();
+                shardedJedisPool.destroy();
             }
         };
     }
 
 
-
     private class PipelineSyncTask implements Callable<Void> {
 
-        Pipeline pipeline ;
+        Pipeline pipeline;
 
-        PipelineSyncTask(Pipeline pipeline){
-            this.pipeline = pipeline ;
+        PipelineSyncTask(Pipeline pipeline) {
+            this.pipeline = pipeline;
         }
 
 

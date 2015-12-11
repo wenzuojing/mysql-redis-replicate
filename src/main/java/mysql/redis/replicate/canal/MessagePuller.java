@@ -30,8 +30,6 @@ public class MessagePuller extends Thread implements Lifecycle {
 
     private final AbstractSink writer;
 
-    private final ScheduledFuture<?> scheduledFuture;
-
     private final ConcurrentSkipListSet<Long> commitBatchIds = new ConcurrentSkipListSet() ;
 
     private final ClientIdentity clientIdentity ;
@@ -44,27 +42,6 @@ public class MessagePuller extends Thread implements Lifecycle {
         this.clientIdentity = new ClientIdentity(destination, (short) 1) ;
 
         setName("puller-" + this.destination + "-thread");
-        scheduledFuture = scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
-            @Override
-            public void run() {
-                try{
-                    long commitBatchId = writer.getCommitBatchId();
-                    NavigableSet<Long> batchIds = commitBatchIds.headSet(commitBatchId, false);
-                    Iterator<Long> iterator = batchIds.iterator();
-                    synchronized (canalService){
-                        while ( iterator.hasNext() ){
-                            Long batchId = iterator.next();
-                            canalService.ack(clientIdentity ,  batchId);
-                            commitBatchIds.remove(batchId);
-                        }
-                    }
-
-                }catch (Exception e){
-                    e.printStackTrace();
-                }
-
-            }
-        }, 0, 10 , TimeUnit.SECONDS);
     }
 
 
@@ -83,7 +60,6 @@ public class MessagePuller extends Thread implements Lifecycle {
             }
         }
         writer.stop();
-        scheduledFuture.cancel(true);
     }
 
 
@@ -94,11 +70,16 @@ public class MessagePuller extends Thread implements Lifecycle {
             canalService.subscribe(clientIdentity);
             while (running) {
 
-                Message message;
-                synchronized (canalService){
-                    message = canalService.getWithoutAck(clientIdentity, this.batchSize, 100L, TimeUnit.MICROSECONDS); // 获取指定数量的数据
+                long commitBatchId = writer.getCommitBatchId();
+                NavigableSet<Long> batchIds = commitBatchIds.headSet(commitBatchId, false);
+                Iterator<Long> iterator = batchIds.iterator();
+                while ( iterator.hasNext() ){
+                    Long batchId = iterator.next();
+                    canalService.ack(clientIdentity ,  batchId);
+                    commitBatchIds.remove(batchId);
                 }
 
+                Message message = canalService.getWithoutAck(clientIdentity, this.batchSize, 100L, TimeUnit.MICROSECONDS); // 获取指定数量的数据
 
                 long batchId = message.getId();
                 int size = message.getEntries().size();
@@ -110,9 +91,7 @@ public class MessagePuller extends Thread implements Lifecycle {
                         delayAck(batchId) ;
                     } catch (Exception e) {
                         logger.error("Got an Exception, when sink message.", e);
-                        synchronized (canalService){
-                            canalService.rollback(clientIdentity, batchId);
-                        }
+                        canalService.rollback(clientIdentity, batchId);
 
                     }
                 }

@@ -99,6 +99,7 @@ public class CoordinatorController implements ZookeeperLeaderElector.LeaderListe
         String ret = doStartDestination(destination, serverId, destinationConfig);
         if ("ok".equals(ret)) {
             destinationConfig.setStopped(false);
+            destinationConfig.setRunFail(false);
             destinationConfig.setRunOn(serverId);
         } else {
             destinationConfig.setStopped(true);
