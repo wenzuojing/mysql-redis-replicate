@@ -90,7 +90,10 @@ public class RedisSink extends AbstractSink {
                             pilelineSyncTask = new PipelineSyncTask(jedis.pipelined());
                             jedisPipelineMap.put(jedis, pilelineSyncTask);
                         }
-                        pilelineSyncTask.pipeline.set(key, JsonUtils.marshalToString(map));
+                        for (String column : map.keySet()) {
+                            pilelineSyncTask.pipeline.hset(key, column, map.get(column));
+                        }
+                        //pilelineSyncTask.pipeline.set(key, JsonUtils.marshalToString(map));
                     }
                     executorService.invokeAll(jedisPipelineMap.values(), 1, TimeUnit.MINUTES);
                 } catch (JedisException e) {
@@ -151,7 +154,10 @@ public class RedisSink extends AbstractSink {
                                 pilelineSyncTask = new PipelineSyncTask(jedis.pipelined());
                                 jedisPipelineMap.put(jedis, pilelineSyncTask);
                             }
-                            pilelineSyncTask.pipeline.set(key, JsonUtils.marshalToString(map));
+                            for (String column : map.keySet()) {
+                                pilelineSyncTask.pipeline.hset(key, column, map.get(column));
+                            }
+                            //pilelineSyncTask.pipeline.set(key, JsonUtils.marshalToString(map));
                         }
                     }
                     executorService.invokeAll(jedisPipelineMap.values(), 1, TimeUnit.MINUTES);
@@ -221,7 +227,6 @@ public class RedisSink extends AbstractSink {
         PipelineSyncTask(Pipeline pipeline) {
             this.pipeline = pipeline;
         }
-
 
         @Override
         public Void call() throws Exception {

@@ -35,7 +35,7 @@ public class CoordinatorController implements ZookeeperLeaderElector.LeaderListe
 
 
     public void start() {
-        zookeeperLeaderElector.start();
+
         ServerInfo serverInfo = new ServerInfo(myId, AddressUtils.getHostIp(), httpEndpoint, System.currentTimeMillis());
         ZookeeperUtils.createEphemeral(ZkPathUtils.getIdsPath(myId), serverInfo);
         ZookeeperUtils.subscribeStateChanges(new IZkStateListener() {
@@ -56,6 +56,7 @@ public class CoordinatorController implements ZookeeperLeaderElector.LeaderListe
             }
         });
         this.aliveServerIds = ZookeeperUtils.getChildren(ZkPathUtils.getIdsPath());
+        zookeeperLeaderElector.start();
     }
 
 
@@ -67,6 +68,9 @@ public class CoordinatorController implements ZookeeperLeaderElector.LeaderListe
     @Override
     public void onBecomingLeader() {
         ZookeeperUtils.subscribeChildChanges(ZkPathUtils.getIdsPath(), new ServerChangeListener());
+        this.aliveServerIds = ZookeeperUtils.getChildren(ZkPathUtils.getIdsPath());
+        checkDestination();
+
     }
 
     public boolean stopDestination(String destination) {
@@ -141,41 +145,48 @@ public class CoordinatorController implements ZookeeperLeaderElector.LeaderListe
         @Override
         public void handleChildChange(String parentPath, List<String> currentChilds) throws Exception {
             aliveServerIds = currentChilds;
-            List<DestinationConfig> allDestinationConfig = destinationConfigManager.getAllDestinationConfig();
-
-            for (DestinationConfig destinationConfig : allDestinationConfig) {
-                if (!destinationConfig.isStopped()) {
-                    String serverId = destinationConfig.getRunOn();
-                    if (!currentChilds.contains(destinationConfig.getRunOn())) {
-                        Random random = new Random();
-                        serverId = currentChilds.get(random.nextInt(currentChilds.size()));
-                    }
-                    ServerInfo serverInfo = getServerInfo(serverId);
-                    boolean fail = invokeEndpointForStart(destinationConfig, serverInfo);
-                    destinationConfig.setRunOn(serverInfo.id);
-                    destinationConfig.setRunFail(fail);
-                    destinationConfigManager.saveOrUpdate(destinationConfig);
-                }
-            }
+            checkDestination();
         }
 
-        private boolean invokeEndpointForStart(DestinationConfig destinationConfig, ServerInfo serverInfo) {
-            boolean fail = true;
-            int retry = 0;
-            while (retry <= 2) {
-                try {
-                    String ret = HttpClientUtils.post(serverInfo.getHttpEndpoint(), Tuple.of("cmd", "start"), Tuple.of("destination", destinationConfig.getDestination()));
-                    if ("ok".equals(ret)) {
-                        fail = false;
-                        break;
-                    }
-                } catch (Exception e) {
-                    logger.error("Retry " + retry + " Run destination fail : dest=" + destinationConfig.getDestination() + ",serverId = " + serverInfo.getId(), e);
-                    retry++;
+
+    }
+
+    private void checkDestination() {
+
+        List<DestinationConfig> allDestinationConfig = destinationConfigManager.getAllDestinationConfig();
+
+        for (DestinationConfig destinationConfig : allDestinationConfig) {
+            if (!destinationConfig.isStopped()) {
+                String serverId = destinationConfig.getRunOn();
+                if (!aliveServerIds.contains(destinationConfig.getRunOn())) {
+                    Random random = new Random();
+                    serverId = aliveServerIds.get(random.nextInt(aliveServerIds.size()));
                 }
+                ServerInfo serverInfo = getServerInfo(serverId);
+                boolean fail = invokeEndpointForStart(destinationConfig, serverInfo);
+                destinationConfig.setRunOn(serverInfo.id);
+                destinationConfig.setRunFail(fail);
+                destinationConfigManager.saveOrUpdate(destinationConfig);
             }
-            return fail;
         }
+    }
+
+    private boolean invokeEndpointForStart(DestinationConfig destinationConfig, ServerInfo serverInfo) {
+        boolean fail = true;
+        int retry = 0;
+        while (retry <= 2) {
+            try {
+                String ret = HttpClientUtils.post(serverInfo.getHttpEndpoint(), Tuple.of("cmd", "start"), Tuple.of("destination", destinationConfig.getDestination()));
+                if ("ok".equals(ret)) {
+                    fail = false;
+                    break;
+                }
+            } catch (Exception e) {
+                logger.error("Retry " + retry + " Run destination fail : dest=" + destinationConfig.getDestination() + ",serverId = " + serverInfo.getId(), e);
+                retry++;
+            }
+        }
+        return fail;
     }
 
     public ServerInfo getServerInfo(String id) {

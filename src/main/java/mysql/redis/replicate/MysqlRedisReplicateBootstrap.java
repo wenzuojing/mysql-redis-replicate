@@ -26,10 +26,10 @@ public class MysqlRedisReplicateBootstrap {
             final WebConsole webConsole = new WebConsole(conf, controllerService, destinationConfigManager, coordinatorController);
 
             controllerService.start();
-            coordinatorController.start();
-            logger.info("## start the controller service success.");
 
+            logger.info("## start the controller service success.");
             webConsole.start();
+            coordinatorController.start();
             Runtime.getRuntime().addShutdownHook(new Thread() {
 
                 public void run() {
